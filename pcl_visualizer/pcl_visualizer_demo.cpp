@@ -80,7 +80,7 @@ boost::shared_ptr<pcl::visualization::PCLVisualizer> customColourVis (pcl::Point
 }
 
 
-boost::shared_ptr<pcl::visualization::PCLVisualizer> normalsVis ()
+boost::shared_ptr<pcl::visualization::PCLVisualizer> normalsVis (std::string pcd_filename)
 {
   // --------------------------------------------------------
   // -----Open 3D viewer and add point cloud and normals-----
@@ -88,12 +88,12 @@ boost::shared_ptr<pcl::visualization::PCLVisualizer> normalsVis ()
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointNormal>::Ptr normals (new pcl::PointCloud<pcl::PointNormal>);
 
-  if (pcl::io::loadPCDFile<pcl::PointXYZ> ("../../data/inputs/Bunny_ascii.pcd", *cloud) == -1) //* load the file
+  if (pcl::io::loadPCDFile<pcl::PointXYZ> (pcd_filename, *cloud) == -1) //* load the file
   {
     PCL_ERROR ("Couldn't read file test_pcd.pcd \n");
   }
 
-  if (pcl::io::loadPCDFile<pcl::PointNormal> ("../../data/inputs/Bunny_ascii.pcd", *normals) == -1) //* load the file
+  if (pcl::io::loadPCDFile<pcl::PointNormal> (pcd_filename, *normals) == -1) //* load the file
   {
     PCL_ERROR ("Couldn't read file test_pcd.pcd \n");
   }
@@ -245,6 +245,8 @@ boost::shared_ptr<pcl::visualization::PCLVisualizer> interactionCustomizationVis
 int
 main (int argc, char** argv)
 {
+  std::string pcd_filename(argv[1]);
+
   // --------------------------------------
   // -----Parse Command Line Arguments-----
   // --------------------------------------
@@ -373,7 +375,7 @@ main (int argc, char** argv)
   }
   else if (normals)
   {
-    viewer = normalsVis();
+    viewer = normalsVis(pcd_filename);
   }
   else if (shapes)
   {
