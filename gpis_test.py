@@ -31,9 +31,7 @@ with open(new_pcd_filename, 'w') as new_pcd_file:
 		new_pcd_file.write("{} {} {} {} {} {}\n".format(point[0], point[1], point[2], normal[0], normal[1], normal[2]))
 
 
-exit()
-
 import matlab.engine
 eng = matlab.engine.start_matlab()
-eng.gpis(new_pcd_filename, obj_filename, 40, nargout=0)
+eng.gpis(pcd_filename, obj_filename, 100, nargout=0)
 
