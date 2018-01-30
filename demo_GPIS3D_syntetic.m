@@ -42,22 +42,32 @@ fminus=-1*ones(1,size(points_out',1))*d_neg;
 X= [D_frompcd(1,:); D_frompcd(2,:) ;D_frompcd(3,:)];
 fzero=zeros(1,size(X',1));
 
+disp(size(points_out));
+disp(size(points_in));
+
+disp(size(fzero));
+disp(size(fone));
+disp(size(X));
+disp(size(fminus));
 
 %% Visualise Object (Cube)
 % Notice that the scale of the Sphere goes from -20 to 20
-scatter3(D_frompcd(1,:),D_frompcd(2,:),D_frompcd(3,:),3)
+%scatter3(D_frompcd(1,:),D_frompcd(2,:),D_frompcd(3,:),3)
 %ylim(gca,[-1 1]); 
 %xlim(gca,[-1 1]); 
 %zlim(gca,[-1 1]); 
-hold on
-scatter3(points_out(1,:),points_out(2,:),points_out(3,:),3,'r');
-scatter3(points_in(1,:),points_in(2,:),points_in(3,:),3,'g');
+%hold on
+%scatter3(points_out(1,:),points_out(2,:),points_out(3,:),3,'r');
+%scatter3(points_in(1,:),points_in(2,:),points_in(3,:),3,'g');
 
 
 % Trainning data
 X= [X,points_in,points_out];
 X= double(X);
 y= [fzero,fone,fminus];
+
+disp(size(X));
+disp(size(y));
 
 % Evaluation limits
 minx= min(X')-0.6; % we extend a bit the boundaries of the object to evaluate a little bit further   
@@ -71,6 +81,9 @@ scale.y.max= maxx(2);
 scale.z.min= minx(3);
 scale.z.max= maxx(3);
 
+disp(scale);
+disp(scale.x);
+
 for j=1:res
     for i=1:res
             d=(j-1)* res^2; % delta
@@ -80,6 +93,9 @@ for j=1:res
             xstar(3,range) = scale.z.min+((j)*((scale.z.max-scale.z.min)/res));
     end
 end  
+
+disp(size(xstar));
+
 tsize=int16((size(xstar,2))^(1/3));
 xeva=reshape(xstar(1,:),tsize,tsize,tsize);
 yeva=reshape(xstar(2,:),tsize,tsize,tsize);
@@ -171,7 +187,6 @@ hh(ii) = patch(isosurface(xeva, yeva, zeva, reshape(mf,size(xeva)), levels(ii),'
     xlabel('x');ylabel('y');zlabel('z')
     colorbar
 vertfaceobj(v,f,c',outputfile_obj)
-export_fig(outputfile_pdf)
 
 field1 = 'mf';  value1 = mf;
 field2 = 'sf';  value2 = sf;
