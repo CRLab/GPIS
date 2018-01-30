@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+
+import os
+import numpy as np
+import argparse
+import pprint
+import yaml
+import pcl
+import tempfile
+
+import curvox.mesh_conversions
+import curvox.cloud_to_mesh_conversions
+import curvox.cloud_conversions
+
+import dask
+import dask.diagnostics
+import dask.base
+
+import matlab.engine
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Compute completions for a given depth and tactile cloud dataset')
+
+    parser.add_argument("config_filename", type=str, default="configs/completions.yaml",
+                        help="""Location of yaml configuration. This contains fields including where to place 
+                        completions and what completions to perform. Here is an example of a yaml configuration:
+                        """)
+
+    args = parser.parse_args()
+
+    with open(args.config_filename, 'r') as stream:
+        try:
+            args.config = yaml.load(stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+            exit()
+
+    # Set directory structure
+    # Output directory will be:
+    # :root_dir:/:completion_directory:/:dataset_name:/:completion_subfolder:/:output_filename:
+    args.root_dir = args.config["root_dir"]
+    args.raw_data_dir = os.path.join(args.root_dir, args.config["raw_data_directory"])
+    args.completion_dir = os.path.join(args.root_dir, args.config["completion_directory"])
+
+    args.depth_cloud_name = args.config["depth_cloud_name"]
+    args.tactile_cloud_name = args.config["tactile_cloud_name"]
+    args.cf_to_wf_npy_filename = args.config["cf_to_wf_npy_filename"]
+    args.grid_size = args.config["grid_size"]
+
+    args.datasets = args.config["datasets"]
+    args.completions = args.config["completions"]
+
+    print("args:")
+    pprint.pprint(vars(args))
+
+    return args
+
+
+def load_depth_np(depth_cloud_filepath):
+    depth_cloud = pcl.PointCloud()
+    depth_cloud.from_file(depth_cloud_filepath)
+    return depth_cloud
+
+
+def load_tactile_np(tactile_cloud_filepath):
+    tactile_cloud = pcl.PointCloud()
+    tactile_cloud.from_file(tactile_cloud_filepath)
+    return tactile_cloud
+
+
+def load_cf_to_wf_transform(cf_to_wf_transform_filepath):
+    return np.loadtxt(cf_to_wf_transform_filepath)
+
+
+def complete_tactile_mesh(depth_cloud,
+                          tactile_cloud,
+                          completion_output_filepath,
+                          cf_to_wf_transform,
+                          downsampled_pointcloud_size,
+                          resolution,
+                          d_pos,
+                          noise_par):
+
+    vt_fhandle, vt_fpath = tempfile.mkstemp(suffix=".pcd")
+    points, normals = curvox.cloud_conversions.calculate_normals_from_depth_and_tactile(depth_cloud, tactile_cloud, downsampled_pointcloud_size)
+    curvox.cloud_conversions.write_pcd_with_normals(points, normals, vt_fpath)
+
+    eng = matlab.engine.start_matlab()
+    eng.gpis(vt_fpath, completion_output_filepath.replace(".ply", ".obj"), resolution, 0.005, 0.005, 0.001, nargout=0) #0.005, 0.005, 0.001,   0.001, 0.001, 0.0005
+
+    ply_data = curvox.cloud_to_mesh_conversions.convert_obj_to_ply(completion_output_filepath.replace(".ply", ".obj"))
+
+    # Transform completion to world frame and write to file
+    transformed_ply_data = curvox.mesh_conversions.transform_ply(ply_data, cf_to_wf_transform)
+    transformed_ply_data = curvox.cloud_to_mesh_conversions.smooth_ply(ply_data)
+    transformed_ply_data.write(open(completion_output_filepath, 'wb'))
+
+
+def construct_delayed_completions(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars):
+    depth_cloud_filepath = os.path.join(root, args.depth_cloud_name)
+    tactile_cloud_filepath = os.path.join(root, args.tactile_cloud_name)
+    cf_to_wf_transform_filepath = os.path.join(root, args.cf_to_wf_npy_filename)
+
+    depth_cloud = dask.delayed(load_depth_np)(depth_cloud_filepath)
+    tactile_cloud = dask.delayed(load_tactile_np)(tactile_cloud_filepath)
+    cf_to_wf_transform = dask.delayed(load_cf_to_wf_transform)(cf_to_wf_transform_filepath)
+
+    completion_output_dir = root.replace(args.raw_data_dir, args.completion_dir)
+    if not os.path.exists(completion_output_dir):
+        os.makedirs(completion_output_dir)
+
+    completions = []
+
+    for downsampled_pointcloud_size in downsampled_pointcloud_sizes:
+        for resolution in resolutions:
+            for d_pos in d_poss:
+                for noise_par in noise_pars:
+                    output_filename = "gpis_smoothed_tactile_completion_{}_{}_{}_{}.ply"
+                    completion_output_filepath = os.path.join(completion_output_dir, output_filename)
+                    completion = dask.delayed(complete_tactile_mesh)(depth_cloud,
+                                                         tactile_cloud,
+                                                         completion_output_filepath,
+                                                         cf_to_wf_transform,
+                                                         downsampled_pointcloud_size,
+                                                         resolution,
+                                                         d_pos,
+                                                         noise_par
+                                                         )
+                    completions.append(completion)
+
+    return completions
+
+
+def main():
+    args = parse_args()
+
+    # get number of examples to run
+    completions = []
+    downsampled_pointcloud_sizes = [200, 300, 400]
+    resolutions = [40, 64, 100]
+    d_poss = [0.005, 0.001, 0.0005]
+    noise_pars = [0.001, 0.0005]
+
+    for dataset_name in args.datasets:
+        dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
+        for root, dirs, mfiles in os.walk(dataset_dir):
+            for mfile in mfiles:
+                if args.depth_cloud_name == mfile:
+                    completions.extend(construct_delayed_completions(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars))
+
+    with dask.diagnostics.ProgressBar():
+        dask.base.compute(completions)
+
+
+if __name__ == "__main__":
+    main()
