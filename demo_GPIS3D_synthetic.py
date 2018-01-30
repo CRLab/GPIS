@@ -13,6 +13,9 @@ import time
 import itertools
 import mcubes
 import plyfile
+import compute_depth_normals
+import compute_tactile_normals
+
 
 # Note to add all depndencies folders or libraries
 def scatter3D(points_list, colors):
@@ -50,27 +53,48 @@ def _generate_ply_data(points, faces):
 # Place matlab in the working directory
 
 ## Load 3D Object
-filename_obj = './data/inputs/Bunny_ascii.pcd' # Ascii
+depth_pcd_filename = 'mustard/depth_cloud_cf.pcd'
+tactile_pcd_filename = 'mustard/tactile_cloud_cf.pcd'
 outputfile_obj = './data/outputs/Bunny.ply'
 
-D_frompcd = pcl.PointCloud()
-D_frompcd.from_file(filename_obj)
+v_pcd = pcl.PointCloud()
+v_pcd.from_file(depth_pcd_filename)
+v_points = v_pcd.to_array()
+v_normals = compute_depth_normals.compute_normals(v_pcd, ksearch=10, search_radius=0)
+
+v_points = v_points[::10]
+v_normals = v_normals[::10]
+
+print("Downsampled depth cloud size: " + str(v_points.shape))
+
+t_pcd = pcl.PointCloud()
+t_pcd.from_file(tactile_pcd_filename)
+t_points = t_pcd.to_array()
+t_normals = compute_tactile_normals.compute_normals(t_pcd)
+
+print("tactile cloud size: " + str(t_points.shape))
+
+vt_points = np.concatenate([v_points, t_points])
+vt_normals = np.concatenate([v_normals, t_normals])
+
+# D_frompcd = pcl.PointCloud()
+# D_frompcd.from_file(filename_obj)
 # Format: x y z nx ny nz radius
 
 ## Prepare Data (Computing Constraints) % Assuming normals are correct ...
 # Parameters can be computed automatically as a function of the size of the object(e.g. 10% of the size defined by a bounding box, see (Wendland, 2002, Surface Reconstructions from unorganized point clouds). 
 
 d = 0.2
-d_pos = 0.2
-d_neg = 0.2 # 0.2
-npar = 0.03 # 0.03
+d_pos = 0.005
+d_neg = 0.005 # 0.2
+npar = 0.001 # 0.03
 
 # Grid resolution
 res = 100 # 150 # grid resolution # 50
 
 ## Computing inside and outside constraints based on normals
-normals = D_frompcd.calc_normals(0.1, 20)
-points = D_frompcd.to_array()
+normals = vt_normals # D_frompcd.calc_normals(0.1, 20)
+points = vt_points # D_frompcd.to_array()
 
 points_out = points + d_neg * normals
 points_in = points - d_pos * normals
@@ -91,7 +115,8 @@ print(fone.shape, fminus.shape, X.shape, fzero.shape)
 
 ## Visualize Object (Cube)
 # Notice that the scale of the Sphere goes from -20 to 20
-#scatter3D([points, points_out, points_in], ['r', 'g', 'b'])
+scatter3D([points, points_out, points_in], ['r', 'g', 'b'])
+exit()
 
 # Training data
 X = np.concatenate([X, points_in, points_out])

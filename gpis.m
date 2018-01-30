@@ -1,5 +1,8 @@
-function gpis(filename_obj, outputfile_obj, res)
+function gpis(filename_obj, outputfile_obj, res, distance_pos, distance_neg, noise_par)
 res = double(res);
+distance_pos = double(distance_pos); % how far along normal to move before placing negative observation point
+distance_neg = double(distance_neg); % how far along normal to move before placing positive observation point
+noise_par = double(noise_par);
 
 %% Description
 % This Script loads a 3D point cloud in pcd format with its normals. 
@@ -12,18 +15,11 @@ addpath(genpath('./dependencies'));
 
 % Place matlab in the working directory
 %% Load 3D object
-outputfile_pdf='./data/outputs/Bunny.pdf';
-
-varname_place='./data/outputs/Bunny.mat'; % MAT FILE NAME THAT WILL BE GENERATED ...
-varname='Bunny'
 D_frompcd=loadpcd(filename_obj); 
 % Format: x y z nx ny nz radius
 
 %% Prepare Data (Computing Constraints) % Assuming normals are correct ...
 % Parameters can be computed automatically as a function of the size of the object(e.g. 10% of the size defined by a bounding box, see (Wendland, 2002, Surface Reconstructions from unorganized point clouds). 
-distance_pos=0.2; % how far along normal to move before placing negative observation point
-distance_neg=0.2; % how far along normal to move before placing positive observation point
-noise_par=0.03;%0.03
 
 %% Computing inside and outside constraints based on normals
 points_out= [D_frompcd(1,:)+distance_neg*D_frompcd(4,:); D_frompcd(2,:)+distance_neg*D_frompcd(5,:);D_frompcd(3,:)+distance_neg*D_frompcd(6,:)];
