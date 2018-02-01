@@ -1,4 +1,4 @@
-root_dir: "/home/david/projects/completion_benchmarks/data"
+root_dir: "/home/david/workspace/completion_benchmarks/data"
 raw_data_directory: "raw_data"
 completion_directory: "completions"
 
