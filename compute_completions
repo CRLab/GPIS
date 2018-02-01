@@ -7,16 +7,18 @@ import pprint
 import yaml
 import pcl
 import tempfile
+import StringIO
+import progressbar
+import time
+import sys
+import csv
 
 import curvox.mesh_conversions
 import curvox.cloud_to_mesh_conversions
 import curvox.cloud_conversions
 
-import dask
-import dask.diagnostics
-import dask.base
-
 import matlab.engine
+eng = matlab.engine.start_matlab()
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Compute completions for a given depth and tactile cloud dataset')
@@ -50,8 +52,8 @@ def parse_args():
     args.datasets = args.config["datasets"]
     args.completions = args.config["completions"]
 
-    print("args:")
-    pprint.pprint(vars(args))
+    # print("args:")
+    # pprint.pprint(vars(args))
 
     return args
 
@@ -85,8 +87,9 @@ def complete_tactile_mesh(depth_cloud,
     points, normals = curvox.cloud_conversions.calculate_normals_from_depth_and_tactile(depth_cloud, tactile_cloud, downsampled_pointcloud_size)
     curvox.cloud_conversions.write_pcd_with_normals(points, normals, vt_fpath)
 
-    eng = matlab.engine.start_matlab()
-    eng.gpis(vt_fpath, completion_output_filepath.replace(".ply", ".obj"), resolution, 0.005, 0.005, 0.001, nargout=0) #0.005, 0.005, 0.001,   0.001, 0.001, 0.0005
+    out = StringIO.StringIO()
+    err = StringIO.StringIO()
+    eng.gpis(vt_fpath, completion_output_filepath.replace(".ply", ".obj"), resolution, d_pos, d_pos, noise_par, nargout=0, stdout=out, stderr=err) #0.005, 0.005, 0.001,   0.001, 0.001, 0.0005
 
     ply_data = curvox.cloud_to_mesh_conversions.convert_obj_to_ply(completion_output_filepath.replace(".ply", ".obj"))
 
@@ -96,14 +99,14 @@ def complete_tactile_mesh(depth_cloud,
     transformed_ply_data.write(open(completion_output_filepath, 'wb'))
 
 
-def construct_delayed_completions(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars):
+def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile):
     depth_cloud_filepath = os.path.join(root, args.depth_cloud_name)
     tactile_cloud_filepath = os.path.join(root, args.tactile_cloud_name)
     cf_to_wf_transform_filepath = os.path.join(root, args.cf_to_wf_npy_filename)
 
-    depth_cloud = dask.delayed(load_depth_np)(depth_cloud_filepath)
-    tactile_cloud = dask.delayed(load_tactile_np)(tactile_cloud_filepath)
-    cf_to_wf_transform = dask.delayed(load_cf_to_wf_transform)(cf_to_wf_transform_filepath)
+    depth_cloud = load_depth_np(depth_cloud_filepath)
+    tactile_cloud = load_tactile_np(tactile_cloud_filepath)
+    cf_to_wf_transform = load_cf_to_wf_transform(cf_to_wf_transform_filepath)
 
     completion_output_dir = root.replace(args.raw_data_dir, args.completion_dir)
     if not os.path.exists(completion_output_dir):
@@ -115,20 +118,28 @@ def construct_delayed_completions(root, args, downsampled_pointcloud_sizes, reso
         for resolution in resolutions:
             for d_pos in d_poss:
                 for noise_par in noise_pars:
-                    output_filename = "gpis_smoothed_tactile_completion_{}_{}_{}_{}.ply"
+                    output_filename = "gpis_smoothed_tactile_completion_{}_{}_{}_{}.ply".format(downsampled_pointcloud_size, resolution, d_pos, noise_par)
                     completion_output_filepath = os.path.join(completion_output_dir, output_filename)
-                    completion = dask.delayed(complete_tactile_mesh)(depth_cloud,
-                                                         tactile_cloud,
-                                                         completion_output_filepath,
-                                                         cf_to_wf_transform,
-                                                         downsampled_pointcloud_size,
-                                                         resolution,
-                                                         d_pos,
-                                                         noise_par
-                                                         )
-                    completions.append(completion)
 
-    return completions
+                    if os.path.isfile(completion_output_filepath):
+                        bar += 1
+                        continue
+                    
+                    start = time.time()
+                    complete_tactile_mesh(depth_cloud,
+                                          tactile_cloud,
+                                          completion_output_filepath,
+                                          cf_to_wf_transform,
+                                          downsampled_pointcloud_size,
+                                          resolution,
+                                          d_pos,
+                                          noise_par
+                                          )
+                    completion_time = time.time() - start
+                    csvwriter.writerow([root.split("/")[-2], completion_time, downsampled_pointcloud_size, resolution, d_pos, noise_par, completion_output_filepath])
+                    csvfile.flush()
+
+                    bar += 1
 
 
 def main():
@@ -141,16 +152,29 @@ def main():
     d_poss = [0.005, 0.001, 0.0005]
     noise_pars = [0.001, 0.0005]
 
+    total_operations = 0
     for dataset_name in args.datasets:
         dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
         for root, dirs, mfiles in os.walk(dataset_dir):
             for mfile in mfiles:
                 if args.depth_cloud_name == mfile:
-                    completions.extend(construct_delayed_completions(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars))
+                    total_operations += len(downsampled_pointcloud_sizes) * len(resolutions) * len(d_poss) * len(noise_pars)
 
-    with dask.diagnostics.ProgressBar():
-        dask.base.compute(completions)
 
+    bar = progressbar.ProgressBar(max_value=total_operations)
+    csvfile = open("gpis_timings.csv", 'w')
+    csvwriter = csv.writer(csvfile)
+    csvwriter.writerow(["Model Name", "time", "pointcloud_size", "resolution", "d_offset", "noise_par", "path"])
+    bar.update(0)
+
+    for dataset_name in args.datasets:
+        dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
+        for root, dirs, mfiles in os.walk(dataset_dir):
+            for mfile in mfiles:
+                if args.depth_cloud_name == mfile:
+                    complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile)
+
+    csvfile.close()
 
 if __name__ == "__main__":
     main()
