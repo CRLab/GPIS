@@ -3,14 +3,12 @@
 import os
 import numpy as np
 import argparse
-import pprint
 import yaml
 import pcl
 import tempfile
 import StringIO
 import progressbar
 import time
-import sys
 import csv
 
 import curvox.mesh_conversions
@@ -19,6 +17,7 @@ import curvox.cloud_conversions
 
 import matlab.engine
 eng = matlab.engine.start_matlab()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Compute completions for a given depth and tactile cloud dataset')
@@ -89,16 +88,15 @@ def complete_tactile_mesh(depth_cloud,
 
     out = StringIO.StringIO()
     err = StringIO.StringIO()
-    eng.gpis(vt_fpath, completion_output_filepath.replace(".ply", ".obj"), resolution, d_pos, d_pos, noise_par, nargout=0, stdout=out, stderr=err) #0.005, 0.005, 0.001,   0.001, 0.001, 0.0005
+    eng.gpis(vt_fpath, completion_output_filepath.replace(".ply", ".obj"), resolution, d_pos, d_pos, noise_par, nargout=0, stdout=out, stderr=err)
 
     ply_data = curvox.cloud_to_mesh_conversions.convert_obj_to_ply(completion_output_filepath.replace(".ply", ".obj"))
 
     # Transform completion to world frame and write to file
     transformed_ply_data = curvox.mesh_conversions.transform_ply(ply_data, cf_to_wf_transform)
-    transformed_ply_data = curvox.cloud_to_mesh_conversions.smooth_ply(ply_data)
-    ply_outfile = open(completion_output_filepath, 'wb')
-    transformed_ply_data.write(ply_outfile)
-    ply_outfile.close()
+    transformed_ply_data = curvox.cloud_to_mesh_conversions.smooth_ply(transformed_ply_data)
+    with open(completion_output_filepath, 'wb') as ply_outfile:
+        transformed_ply_data.write(ply_outfile)
 
 
 def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile):
@@ -146,8 +144,7 @@ def main():
     args = parse_args()
 
     # get number of examples to run
-    completions = []
-    downsampled_pointcloud_sizes = [200]
+    downsampled_pointcloud_sizes = [200, 300, 400]
     resolutions = [40, 64, 100]
     d_poss = [0.005, 0.0005]
     noise_pars = [0.001, 0.0005]
@@ -159,7 +156,6 @@ def main():
             for mfile in mfiles:
                 if args.depth_cloud_name == mfile:
                     total_operations += len(downsampled_pointcloud_sizes) * len(resolutions) * len(d_poss) * len(noise_pars)
-
 
     bar = progressbar.ProgressBar(max_value=total_operations)
     timestr = time.strftime("%Y%m%d-%H%M%S")
@@ -176,6 +172,7 @@ def main():
                         complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile)
 
     csvfile.close()
+
 
 if __name__ == "__main__":
     main()
