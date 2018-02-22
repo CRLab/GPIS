@@ -1,11 +1,17 @@
 root_dir: "/home/david/workspace/completion_benchmarks/data"
 raw_data_directory: "raw_data"
-completion_directory: "completions"
+completion_directory: "completion_timings"
+csv_data_path: "csvs"
+agg_csv_path: "agg_csvs"
 
 cf_to_wf_npy_filename: "cf2gt.npy"
 depth_cloud_name: "depth_cloud_cf.pcd"
 tactile_cloud_name: "tactile_cloud_cf.pcd"
-grid_size: 40
+ground_truth_mesh_filename: "gt.ply"
+grid_size: 80
+
+jaccard:
+  - "full"
 
 datasets:
   - "YCB_GRASP_590_Dataset_Test"
@@ -13,11 +19,49 @@ datasets:
 
 completions:
   - completion_name: "qhull"
-    output_filename: "qhull_tactile_smoothed_completion.ply"
+    output_filename: "qhull_smoothed_completion.ply"
     include_tactile: true
   - completion_name: "marching_cubes"
     output_filename: "marching_cubes_tactile_smoothed_completion.ply"
     include_tactile: true
+#  - completion_name: "depth_only_cnn_completion"
+#    output_filename: "depth_only_cnn_completion.ply"
+#    include_tactile: true
+#  - completion_name: "depth_tactile_cnn_completion"
+#    output_filename: "depth_tactile_cnn_completion.ply"
+#    include_tactile: true
+#  - completion_name: "gpis"
+#    output_filename: "gpis_smoothed_tactile_completion_300_100_0.0005_0.001.ply"
+#    include_tactile: true
+
+# GPIS parameters
+downsampled_pointcloud_sizes:
+  - 200
+  - 300
+  - 400
+
+resolutions:
+  - 40
+  - 64
+  - 100
+
+d_poss:
+  - 0.005
+  - 0.0005
+
+noise_pars:
+  - 0.001
+  - 0.0005
+
+
 
 # Output directory will be:
 # :root_dir:/:completion_directory:/:dataset_name:/:split_name:/:meshname:/:output_filename:
+
+# Timings w/ smoothing:
+# qhull: 0.45020852423s
+# marching_cubes: 1.53270235335s
+
+# Timings w/out smoothing:
+# qhull: 0.198268840267s
+# marching_cubes: 0.88555089987s

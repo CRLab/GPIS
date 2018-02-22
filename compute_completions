@@ -17,6 +17,7 @@ import curvox.cloud_conversions
 
 import matlab.engine
 eng = matlab.engine.start_matlab()
+timings = {}
 
 
 def parse_args():
@@ -51,6 +52,11 @@ def parse_args():
     args.datasets = args.config["datasets"]
     args.completions = args.config["completions"]
 
+    args.downsampled_pointcloud_sizes = args.config["downsampled_pointcloud_sizes"]
+    args.resolutions = args.config["resolutions"]
+    args.d_poss = args.config["d_poss"]
+    args.noise_pars = args.config["noise_pars"]
+
     # print("args:")
     # pprint.pprint(vars(args))
 
@@ -82,6 +88,7 @@ def complete_tactile_mesh(depth_cloud,
                           d_pos,
                           noise_par):
 
+    start = time.time()
     vt_fhandle, vt_fpath = tempfile.mkstemp(suffix=".pcd")
     points, normals = curvox.cloud_conversions.calculate_normals_from_depth_and_tactile(depth_cloud, tactile_cloud, downsampled_pointcloud_size)
     curvox.cloud_conversions.write_pcd_with_normals(points, normals, vt_fpath)
@@ -94,12 +101,24 @@ def complete_tactile_mesh(depth_cloud,
 
     # Transform completion to world frame and write to file
     transformed_ply_data = curvox.mesh_conversions.transform_ply(ply_data, cf_to_wf_transform)
+    unsmoothed_completion_time = time.time() - start
+
     transformed_ply_data = curvox.cloud_to_mesh_conversions.smooth_ply(transformed_ply_data)
     with open(completion_output_filepath, 'wb') as ply_outfile:
         transformed_ply_data.write(ply_outfile)
 
+    smoothed_completion_time = time.time() - start
 
-def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile):
+    if (downsampled_pointcloud_size, resolution, d_pos, noise_par, "smoothed") not in timings:
+        timings[(downsampled_pointcloud_size, resolution, d_pos, noise_par, "smoothed")] = 0
+    timings[(downsampled_pointcloud_size, resolution, d_pos, noise_par, "smoothed")] += smoothed_completion_time
+
+    if (downsampled_pointcloud_size, resolution, d_pos, noise_par, "unsmoothed") not in timings:
+        timings[(downsampled_pointcloud_size, resolution, d_pos, noise_par, "unsmoothed")] = 0
+    timings[(downsampled_pointcloud_size, resolution, d_pos, noise_par, "unsmoothed")] += unsmoothed_completion_time
+
+
+def complete_mesh(root, args, bar):
     depth_cloud_filepath = os.path.join(root, args.depth_cloud_name)
     tactile_cloud_filepath = os.path.join(root, args.tactile_cloud_name)
     cf_to_wf_transform_filepath = os.path.join(root, args.cf_to_wf_npy_filename)
@@ -112,10 +131,10 @@ def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss,
     if not os.path.exists(completion_output_dir):
         os.makedirs(completion_output_dir)
 
-    for downsampled_pointcloud_size in downsampled_pointcloud_sizes:
-        for resolution in resolutions:
-            for d_pos in d_poss:
-                for noise_par in noise_pars:
+    for downsampled_pointcloud_size in args.downsampled_pointcloud_sizes:
+        for resolution in args.resolutions:
+            for d_pos in args.d_poss:
+                for noise_par in args.noise_pars:
                     output_filename = "gpis_smoothed_tactile_completion_{}_{}_{}_{}.ply".format(downsampled_pointcloud_size, resolution, d_pos, noise_par)
                     completion_output_filepath = os.path.join(completion_output_dir, output_filename)
 
@@ -123,7 +142,6 @@ def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss,
                         bar += 1
                         continue
                     
-                    start = time.time()
                     complete_tactile_mesh(depth_cloud,
                                           tactile_cloud,
                                           completion_output_filepath,
@@ -133,9 +151,6 @@ def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss,
                                           d_pos,
                                           noise_par
                                           )
-                    completion_time = time.time() - start
-                    csvwriter.writerow([root.split("/")[-2], completion_time, downsampled_pointcloud_size, resolution, d_pos, noise_par, completion_output_filepath])
-                    csvfile.flush()
 
                     bar += 1
 
@@ -143,35 +158,30 @@ def complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss,
 def main():
     args = parse_args()
 
-    # get number of examples to run
-    downsampled_pointcloud_sizes = [200, 300, 400]
-    resolutions = [40, 64, 100]
-    d_poss = [0.005, 0.0005]
-    noise_pars = [0.001, 0.0005]
-
     total_operations = 0
+    total_meshes = 0
     for dataset_name in args.datasets:
         dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
         for root, dirs, mfiles in os.walk(dataset_dir):
             for mfile in mfiles:
                 if args.depth_cloud_name == mfile:
-                    total_operations += len(downsampled_pointcloud_sizes) * len(resolutions) * len(d_poss) * len(noise_pars)
+                    total_meshes += 1
+                    total_operations += len(args.downsampled_pointcloud_sizes) * len(args.resolutions) * len(args.d_poss) * len(args.noise_pars)
 
     bar = progressbar.ProgressBar(max_value=total_operations)
-    timestr = time.strftime("%Y%m%d-%H%M%S")
-    with open("gpis_timings{}.csv".format(timestr), 'w') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        csvwriter.writerow(["Model Name", "time", "pointcloud_size", "resolution", "d_offset", "noise_par", "path"])
-        bar.update(0)
+    bar.update(0)
 
-        for dataset_name in args.datasets:
-            dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
-            for root, dirs, mfiles in os.walk(dataset_dir):
-                for mfile in mfiles:
-                    if args.depth_cloud_name == mfile:
-                        complete_mesh(root, args, downsampled_pointcloud_sizes, resolutions, d_poss, noise_pars, bar, csvwriter, csvfile)
+    for dataset_name in args.datasets:
+        dataset_dir = os.path.join(args.raw_data_dir, dataset_name)
+        for root, dirs, mfiles in os.walk(dataset_dir):
+            for mfile in mfiles:
+                if args.depth_cloud_name == mfile:
+                    complete_mesh(root, args, bar)
+                    break
 
-    csvfile.close()
+    print("Average timings:")
+    for key, timing in timings.iteritems():
+        print("{}: {}s".format(key, timing/total_meshes))
 
 
 if __name__ == "__main__":
