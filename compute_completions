@@ -138,9 +138,9 @@ def complete_mesh(root, args, bar):
                     output_filename = "gpis_smoothed_tactile_completion_{}_{}_{}_{}.ply".format(downsampled_pointcloud_size, resolution, d_pos, noise_par)
                     completion_output_filepath = os.path.join(completion_output_dir, output_filename)
 
-                    if os.path.isfile(completion_output_filepath):
-                        bar += 1
-                        continue
+                    # if os.path.isfile(completion_output_filepath):
+                    #     bar += 1
+                    #     continue
                     
                     complete_tactile_mesh(depth_cloud,
                                           tactile_cloud,
