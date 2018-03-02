@@ -1,0 +1,122 @@
+#!/usr/bin/env python
+
+import os
+import argparse
+import pandas as pd
+import yaml
+
+
+def is_non_zero_file(fpath):
+    return True if os.path.isfile(fpath) and os.path.getsize(fpath) > 0 else False
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Compute CSV for Jaccard Similarities for a given completion method')
+
+    parser.add_argument("config_filename", type=str, default="configs/completions.yaml",
+                        help="""Location of yaml configuration. This contains fields including where to place 
+                        completions and what completions were performed. Here is an example of a yaml configuration:
+                        """)
+
+    args = parser.parse_args()
+
+    with open(args.config_filename, 'r') as stream:
+        try:
+            args.config = yaml.load(stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+            exit()
+
+    # Set directory structure
+    # Output directory will be:
+    # :root_dir:/:completion_directory:/:dataset_name:/:completion_subfolder:/:output_filename:
+    args.root_dir = args.config["root_dir"]
+    args.csv_data_path = os.path.join(args.root_dir, args.config["csv_data_path"])
+    args.agg_csv_path = os.path.join(args.root_dir, args.config["agg_csv_path"])
+
+    return args
+
+
+def best_hausdorff(hausdorf_dict):
+    min_val = 1
+    max_name = ""
+    for csv_name, values in hausdorf_dict.iteritems():
+        # new_val = sorted(values)[len(values)/2]
+        new_val = float(sum(values)) / len(values)
+        # new_val = max(values)
+        if new_val < min_val:
+            min_val = new_val
+            max_name = csv_name
+
+    max_name = max_name.split('_')
+    max_name = "{},{},0.{},0.{}".format(max_name[-6], max_name[-5], max_name[-3], max_name[-1])
+    return max_name, min_val
+
+
+def best_jaccard(jaccard_dict):
+    max_val = 0
+    max_name = ""
+    for csv_name, values in jaccard_dict.iteritems():
+        # new_val = sorted(values)[len(values)/2]
+        new_val = float(sum(values)) /len(values)
+        # new_val = max(values)
+        if new_val > max_val and new_val != 0:
+            max_val = new_val
+            max_name = csv_name
+
+    max_name = max_name.split('_')
+    max_name = "{},{},0.{},0.{}".format(max_name[-6], max_name[-5], max_name[-3], max_name[-1])
+    return max_name, max_val
+
+
+def main():
+    args = parse_args()
+
+    jaccard_full_comparisons = {}
+    hausdorff_comparisons = {}
+    jaccard_exact_comparisons = {}
+
+    for csv_file in os.listdir(args.csv_data_path):
+        csv_path = os.path.join(args.csv_data_path, csv_file)
+
+        if not (csv_file.startswith("hausdorff") or csv_file.startswith("jaccard")) or "Live" in csv_file:
+            continue
+
+        if is_non_zero_file(csv_path):
+            csv_data = pd.read_csv(csv_path, index_col=False, usecols=[2], header=None)
+        else:
+            continue
+
+        csv_data = list(csv_data.iloc[:, 0])
+        try:
+            csv_data = map(float, csv_data)
+        except ValueError:
+            continue
+
+        csv_file = csv_file.replace(".csv", "")
+        if csv_file.startswith("hausdorff"):
+            hausdorff_comparisons[csv_file] = csv_data
+        elif "full" in csv_file:
+            jaccard_full_comparisons[csv_file] = csv_data
+        else:
+            jaccard_exact_comparisons[csv_file] = csv_data
+
+    # Make csv data path
+    if not os.path.exists(args.agg_csv_path):
+        os.makedirs(args.agg_csv_path)
+
+    bhname, bhvalue = best_hausdorff(hausdorff_comparisons)
+
+    jfname, jfvalue = best_jaccard(jaccard_full_comparisons)
+
+    jename, jevalue = best_jaccard(jaccard_exact_comparisons)
+
+    print("Best:")
+    print("Hausdorff    :{} | {}".format(bhname[-22:], bhvalue))
+    print("Jaccard full :{} | {}".format(jfname[-22:], jfvalue))
+    print("Jaccard exact:{} | {}".format(jename[-22:], jevalue))
+    print("")
+
+
+if __name__ == "__main__":
+    main()
